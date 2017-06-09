@@ -1,0 +1,232 @@
+% !TEX program = pdflatex
+\input{preamble/preamble.tex}
+\input{preamble/preamble_math.tex}
+
+% \linenumbers
+
+\title{A Discussion of ``Nonparametric Bayes Modeling of Populations of Networks''\\
+by Durante, Dunson, and Vogelstein}
+\author{Scott W. Linderman and David M. Blei}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+
+\end{abstract}
+
+\section{Introduction}
+
+We congratulate the authors...
+
+\section{Mixtures of Latent Space Models}
+\citet{durante2016nonparametric} propose a probabilistic model for
+populations of networks.  Let~$\{\bA_n\}_{n=1}^N$ denote a collection
+of binary adjacency matrices, with
+each~${A_n \in \{0,1\}^{V \times V}}$ representing the observed
+connectivity in the~$n$-th network.  ${A_{n,[u,v]}=1}$ indicates that
+an edge is observed from vertex~$u$ to vertex~$v$ in
+network~$n$.
+The~$V$ vertices are shared by all~$N$ networks.\todo{obvious?}
+By assumption, these networks are undirected~(${A_{n,[u,v]} \equiv A_{n,[v,u]}}$)
+and without self-loops~(${A_{n,[v,v]} \equiv 0}$). Thus, it suffices to model only
+the lower triangular entries.
+
+The authors build upon the latent space model (LSM), a canonical model
+in probabilistic network analysis \citep{hoff2002latent,
+  hoff2008modeling}. An LSM is defined by the following parameters and
+latent variables: a bias~${z_{u,v} \in \reals}$ for each edge; an
+embedding~${x_v \in \reals^D}$ for each vertex; and a
+positive-definite ``scaling''
+matrix~${\bLambda = \diag(\blambda)}$,~$\blambda \in \reals_+^D$, that
+determines the relative importance of the~$D$ latent dimensions.  For
+convenience, let~${\bZ = \{\{z_{u,v}\}_{u=1}^V\}_{v=1}^{u-1}}$ denote
+the set of per-connection biases.  Given these parameters and latent
+variables, the edges are rendered conditionally independent, each
+modeled as a Bernoulli random variable with probability,
+\begin{align}
+  \Pr(A_{n,[u,v]}=1 \given z_{u,v}, \bx_u, \bx_v, \bLambda)
+  &= \sigma(z_{u,v} + \bx_u^\trans \bLambda \bx_v),
+  & (u &> v),
+\end{align}
+where~${\sigma(x) = (1+e^{-x})^{-1}}$ is the logistic function.
+Clearly, the per-connection bias terms are only warranted
+~when~${N > 1}$; otherwise, the model is over-parameterized.
+
+While LSM's are capable of modeling a variety of individual network
+structures---simple Erd\H{o}s-R\'{e}nyi
+networks~\citep{erdos1959random}, small-world
+networks~\citep{watts1998collective}, scale-free
+networks~\citep{barabasi1999emergence}, stochastic block
+models~\citep{nowicki2001estimation, airoldi2008mixed}, and more---a
+population of networks may exhibit a diversity of such connectivity
+patterns.  Mixtures of latent space models, as suggested
+by~\citet{durante2016nonparametric}, are naturally suited to this type
+of heterogeneous data.
+
+Now let there
+be~$H$ separate mixture components, each with 
+a unique set of vertex embeddings~${\bx_v^{(h)} \in \reals^D}$
+and its own scaling matrix~$\bLambda^{(h)}$. Furthermore,
+let~${h_n \in \{1, \ldots, H\}}$ denote the mixture component
+to which the~$n$-th network is attributed. 
+The likelihood of a network is then
+given by,
+\begin{align}
+  \label{eq:molsm_lkhd}
+  \Pr \left(\bA_n \given
+    \bZ, \{\{\bx_v^{(h)}\}_{v=1}^V,
+  \bLambda^{(h)}\}_{h=1}^H, h_n \right) 
+  = \prod_{u=1}^V \prod_{v=1}^{u-1}
+  \distBernoulli \left(A_{n,[u,v]} \given
+    \sigma(z_{u,v} + \bx_{u}^{(h_n)^\trans} \bLambda^{(h_n)} \bx_v^{(h_n)}) \right),
+\end{align}
+where~${\distBernoulli(x \given p) = p^x (1-p)^{1-x}}$ is the Bernoulli likelihood function.
+
+\citet{durante2016nonparametric} provide conditions under which a prior
+distribution on latent variables and parameters will ensure support for
+the entire space of adjacency matrices, which ensures posterior consistency
+as the number of networks~$N$ goes to infinity. Moreover, they leverage
+use P\'{o}lya-gamma augmentation to develop an
+efficient Gibbs sampling algorithm for posterior inference in the case
+where~$\bx_v^{(h)}$ and~$z_{u,v}$ have Gaussian prior distributions. 
+While the Bernoulli likelihoods are not conjugate with these Gaussian
+priors, conditioning on the P\'{o}lya-gamma auxiliary variables renders them so.
+These auxiliary variables have straightforward and na\"{i}vely parallelizable
+updates as well, making the overall algorithm highly efficient. 
+
+\section{A Factorial Generalization}
+We offer an alternative perspective on the mixture of latent
+space models described above.  From this viewpoint, a number
+of natural generalizations become clear. Consider the space
+formed by combining the embeddings and scalings of the~$H$
+mixture components.  Specifically, let
+\begin{align}
+  \widetilde{\bx}_v &= \left[\bx_v^{(1)^\trans}, \ldots, \bx_v^{(H)^\trans}\right]^\trans, \\
+  \widetilde{\blambda} &= \left[\blambda^{(1)^\trans}, \ldots, \blambda^{(H)^\trans} \right]^\trans
+\end{align}
+denote column vectors in~$\reals^{D \cdot H}$ formed by concatenating the
+embeddings and scaling factors of each mixture component, respectively.
+Then, introduce a ``mask'' function that takes in a mixture component index and
+outputs a binary vector of length~$D \cdot H$ defined by,
+\begin{align}
+  \widetilde{\bbm}(h) &= \left[ \bbI[h=1] \cdot \bone_D^\trans, \ldots, \bbI[h=H] \cdot \bone_D^\trans \right]^\trans,
+\end{align}
+where~$\bbI[\cdot]$ is an indicator that evaluates to one if its
+argument is true and zero otherwise, and~$\bone_D$ is a column vector
+of length~$D$ filled with ones. For any value of~$h$, the output is a
+vector with exactly~$D$ ones in the coordinates corresponding
+to~$\bx_v^{(h)}$ and~$\blambda^{(h)}$. The likelihood in Eq.~\eqref{eq:molsm_lkhd} can now
+be equivalently expressed as,
+\begin{align}
+  \Pr \left(\bA_n \given
+  \bZ, \{\widetilde{\bx}_v\}_{v=1}^V,
+  \widetilde{\blambda}, h_n \right) 
+  &= \prod_{u=1}^V \prod_{v=1}^{u-1}
+  \distBernoulli \left(A_{n,[u,v]} \given
+    \sigma \left(z_{u,v} + \widetilde{\bx}_{u}^\trans
+    \diag(\widetilde{\blambda} \odot \widetilde{\bbm}(h_n)) \,
+    \widetilde{\bx}_v \right) \right),
+\end{align}
+where~$\odot$ denotes elementwise multiplication. The mask effectively
+turns on or off certain dimensions of the latent space according to
+the network's mixture assignment~$h_n$.
+
+This suggests an obvious extension: rather than restricting the model
+to exactly~$H$ unique masks, instead allow each network to take on any
+of thee~$2^{D \cdot H}$ possible binary masks. More generally, let~$K$
+denote the total number of latent factors (here~${K=D \cdot H}$) and
+let~${\widetilde{\bbm}_n \in \{0,1\}^K}$ represent a mask vector
+for network~$n$. Intuitively, the set of networks is
+characeterized by~$K$ latent factors; in any given network, only a
+subset of those factors play a role in deterimining the edge
+probabilities. Unlike the mixture model, in which only~$H$ subsets of
+factors are allowed, here any possible combination of factors can be
+chosen, making this a strict generalization of the mixture model.
+Moreover, with more flexibility in the choice of subset, it
+is likely that~${K < D \cdot H}$ dimensions will suffice for this
+\emph{factorial latent space model} (fLSM).
+
+
+One of the primary contributions of \citet{durante2016nonparametric}
+is a Bayesian nonparametric model that grows in complexity (number of
+mixture components, number of latent dimensions per component) as the
+data demands. In the finite case (fixed~$K$), a natural prior is
+\begin{align}
+  p(\widetilde{\bbm}_n \given \{\rho_k\}_{k=1}^K)
+  &=\prod_{k=1}^K \distBernoulli(\widetilde{m}_{n,k} \given \rho_k), \\
+  p(\rho_k; \alpha) &= \distBeta(\rho_k \given \tfrac{\alpha}{K}, 1), 
+\end{align}
+where~$\alpha$ is a hyperparameter that controls the sparsity of the
+mask matrices. The Bayesian nonparametric limit of this prior as~$K$
+goes to infinity is known as the Indian buffet
+process~\citep{griffiths2005infinite}.  Intuitively, each new network
+has nonzero probability of introducing a new latent factor, i.e. of
+increasing the dimensionality of the embeddings.
+
+Inference in latent factor models is complicated by posterior dependencies
+between the latent variables induced by the likelihood.  To surmount
+this issue, it is often advantageous to analytically integrate out
+the parameters associated with each feature---here, the latent
+embeddings~$\widetilde{\bx}_v$. After P\'{o}lya-gamma augmentation,
+this is indeed possible.
+
+%Let~$\widetilde{\bX} \in \reals^{V \times K}$
+%be a matrix with rows~$\widetilde{\bx}_v$, let~$\bZ
+
+\begin{multline}
+  p(\{\widetilde{\bbm}_n\}_{n=1}^N \given \{\bA_n\}_{n=1}^N, \bZ, \widetilde{\blambda})
+  \propto \int \prod_{n=1}^N \prod_{u=1}^V \prod_{v=1}^{u-1}
+    \distBernoulli(A_{n,[u,v]} \given \sigma( z_{u,v} + \widetilde{\bx}_u^\trans
+    \diag(\widetilde{\bbm}_n \odot \widetilde{\blambda}) \widetilde{\bx}_v)) \\
+    \times \left[ \prod_{v=1}^V \distNormal(\widetilde{\bx}_v \given 0, \bI_K) \right]
+    p(\widetilde{\bbm}_n \given \{\rho_k\}_{k=1}^K)
+    \diff \widetilde{\bx}_1 \cdots \diff \widetilde{\bx}_V
+\end{multline}
+
+
+
+
+\bibliographystyle{apa}
+\bibliography{refs.bib}
+
+\end{document}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
