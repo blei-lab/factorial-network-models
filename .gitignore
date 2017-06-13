@@ -1,0 +1,13 @@
+*.mat
+*.aux
+*.bbl
+*.blg
+*.fls
+*.out
+*.log
+*.fdb_latexmk
+*.DS_Store
+*.idea/
+*~
+src/.ipynb_checkpoints/*
+*.pdf
