@@ -1,40 +1,28 @@
 """
 Latent space models and their generalizations.
 
-Scott Linderman
-2017
+Scott Linderman.  June 2017.
 """
-import os, pickle
-
 import numpy as np
 import numpy.random as npr
 from scipy.misc import logsumexp
-npr.seed(0)
-
-import matplotlib.pyplot as plt
-from matplotlib.cm import get_cmap
-import seaborn as sns
-sns.set_style("white")
-sns.set_context("talk")
 
 from pypolyagamma import pgdrawvpar, get_omp_num_threads, PyPolyaGamma
 from pypolyagamma.utils import sample_gaussian
 
-
-# Utils
-onehot = lambda x, K: np.arange(K) == x
-logistic = lambda x: 1 / (1 + np.exp(-x))
+from lsm.utils import logistic, onehot
 
 
-# Models
 class LatentSpaceModel(object):
-    def __init__(self, V, K, X=None, b=None, sigmasq_b=1.0):
+    def __init__(self, V, K, X=None, b=None, sigmasq_b=1.0, sigmasq_x=1.0):
         self.V, self.K = V, K
 
         # Initialize parameters
-        self.X = npr.randn(V, K) if X is None else X * np.ones((V, K))
-        self.b = np.zeros((V, V)) if b is None else b * np.ones((V, V))
+        self._sigmasq_x = sigmasq_x * np.ones(K)
+        self.X = np.sqrt(self.sigmasq_x) * npr.randn(V, K) if X is None else X * np.ones((V, K))
+
         self.sigmasq_b = sigmasq_b
+        self.b = np.zeros((V, V)) if b is None else b * np.ones((V, V))
 
         # Models encapsulate data
         # A:  observed adjacency matrix
@@ -48,6 +36,14 @@ class LatentSpaceModel(object):
         num_threads = get_omp_num_threads()
         seeds = npr.randint(2 ** 16, size=num_threads)
         self.ppgs = [PyPolyaGamma(seed) for seed in seeds]
+
+    @property
+    def sigmasq_x(self):
+        return self._sigmasq_x
+
+    def initialize(self):
+        # Initialize latent variables if necessary
+        pass
 
     def add_data(self, A, m=None, mask=None):
         V, D = self.V, self.K
@@ -134,7 +130,7 @@ class LatentSpaceModel(object):
     def _resample_xv(self, v, omegavs):
         # Resample xv given {A_{n,v,:}, m_n, omega_{n,v,:}}_{n=1}^N and data masks
         V, K = self.V, self.K
-        prior_J = np.eye(self.K)
+        prior_J = np.diag(1. / self.sigmasq_x)
         prior_h = np.zeros(self.K)
 
         lkhd_h = np.zeros(K)
@@ -182,6 +178,64 @@ class LatentSpaceModel(object):
         self.b = self.b * L + self.b.T * L.T
 
 
+class MultiplicativeInvGammaPrior(object):
+    """
+    Shrinkage prior on the scale of the latent embeddings
+    """
+    def __init__(self, K, a1, a2):
+        self.K, self.a1, self.a2 = K, a1, a2
+        self.nu = np.ones(K)
+
+        # Resample from prior to initialize nu
+        self.resample(np.zeros((0, K)))
+
+    @property
+    def sigmasq(self):
+        return 1. / np.cumprod(self.nu)
+
+    def resample(self, X):
+        assert isinstance(X, np.ndarray) and X.ndim == 2 and X.shape[1] == self.K
+        V, K = X.shape
+
+        # Define a helper function to take product of certain fraction of nu's.
+        def theta(m, k):
+            th = 1.0
+            for t in range(m):
+                if t != k:
+                    th *= self.nu[t]
+            return th
+
+        # Resample the nu_1; this one is special
+        a1_post = self.a1 + 0.5 * V * K
+        b1_post = 1.0
+        for i in range(K):
+            b1_post += 0.5 * theta(i, 1) * np.sum(X[:, i]**2)
+        self.nu[0] = npr.gamma(a1_post, 1./b1_post)
+
+        # Resample the nu_k; k >= 2
+        for k in range(1, K):
+            ak_post = self.a2 + 0.5 * V * (K - k)
+            bk_post = 1.0
+            for i in range(k, K):
+                bk_post += 0.5 * theta(i, k) * np.sum(X[:, i] ** 2)
+            self.nu[k] = npr.gamma(ak_post, 1. / bk_post)
+
+
+class LatentSpaceModelWithShrinkage(LatentSpaceModel):
+    def __init__(self, V, K, X=None, b=None, sigmasq_b=1.0, a1=1.0, a2=1.0):
+        self.sigmasq_x_prior = MultiplicativeInvGammaPrior(K, a1, a2)
+        super(LatentSpaceModelWithShrinkage, self).\
+            __init__(V, K, X=X, b=b, sigmasq_b=sigmasq_b)
+
+    @property
+    def sigmasq_x(self):
+        return self.sigmasq_x_prior.sigmasq
+
+    def resample(self):
+        super(LatentSpaceModelWithShrinkage, self).resample()
+        self.sigmasq_x_prior.resample(self.X)
+
+
 class MixtureOfLatentSpaceModels(LatentSpaceModel):
     """
     Extend the simple latent space model with a mixture distribution.
@@ -209,6 +263,18 @@ class MixtureOfLatentSpaceModels(LatentSpaceModel):
         self.nu = nu * np.ones(self.H) if nu is not None else alpha * np.ones(self.H)
         self.nu /= np.sum(self.nu)
         assert self.nu.shape == (self.H,) and np.all(self.nu >= 0)
+
+    def initialize(self):
+        # Cluster the adjacency matrices to initialize h
+        from sklearn.cluster import KMeans
+        km = KMeans(n_clusters=self.H)
+        Aflat = np.array([A[np.tril_indices(self.V, k=-1)] for A in self.As])
+        km.fit(Aflat)
+
+        assert km.labels_.shape == (len(self.As),)
+        for n, hn in enumerate(km.labels_):
+            self.hs[n] = hn
+            self.ms[n] = np.repeat(onehot(hn, self.H), self.D)
 
     def add_data(self, A, m=None, mask=None, h=None):
         h = h if h is not None else npr.randint(self.H)
@@ -254,8 +320,27 @@ class MixtureOfLatentSpaceModels(LatentSpaceModel):
             self.ms[n] = np.repeat(onehot(hn, self.H), self.D)
 
     def _resample_nu(self):
-        alpha_post = self.alpha / K + np.bincount(self.hs, minlength=self.H)
+        alpha_post = self.alpha / self.K + np.bincount(self.hs, minlength=self.H)
         self.nu = npr.dirichlet(alpha_post)
+
+
+class MixtureOfLatentSpaceModelsWithShrinkage(MixtureOfLatentSpaceModels):
+    def __init__(self, V, K, H, X=None, b=None, sigmasq_b=1.0, nu=None, alpha=1.0, a1=1.0, a2=1.0):
+        self.sigmasq_x_priors = [MultiplicativeInvGammaPrior(K // H, a1, a2) for _ in range(H)]
+
+        super(MixtureOfLatentSpaceModelsWithShrinkage, self).\
+            __init__(V, K, H, X=X, b=b, sigmasq_b=sigmasq_b, nu=nu, alpha=alpha)
+
+    @property
+    def sigmasq_x(self):
+        return np.hstack([prior.sigmasq for prior in self.sigmasq_x_priors])
+
+    def resample(self):
+        super(MixtureOfLatentSpaceModelsWithShrinkage, self).resample()
+
+        # Resample prior
+        for h, prior in enumerate(self.sigmasq_x_priors):
+            prior.resample(self.X[:, h*self.D:(h+1)*self.D])
 
 
 class FactorialLatentSpaceModel(LatentSpaceModel):
@@ -313,208 +398,3 @@ class FactorialLatentSpaceModel(LatentSpaceModel):
         alpha_post = self.alpha / self.K + M.sum(axis=0)
         beta_post = 1.0 + (1 - M).sum(axis=0)
         self.rho = npr.beta(alpha_post, beta_post)
-
-
-def random_mask(V, missing_frac=0.1):
-    mask = npr.rand(V, V) < 1 - missing_frac
-    L = np.tril(np.ones((V, V), dtype=bool), k=-1)
-    mask = mask * L + mask.T * L.T
-    return mask
-
-
-def synthetic_demo():
-    V = 20                  # Number of vertices
-    K = 2                   # Number of latent factors
-    N = 50                  # Number of networks in population
-    missing_frac = 0.1      # Fraction of data to withhold for testing
-    N_itr = 20              # Number of iterations of sampler
-    sigmasq_b = 0.0         # Prior variance of b (0 -> deterministically zero bias)
-
-    # Sample data from a model with simple 2D covariates
-    X = np.column_stack((np.linspace(-2, 2, V), np.zeros((V, K - 1))))
-    true_model = LatentSpaceModel(V, K, X=X, sigmasq_b=sigmasq_b)
-    masks = [random_mask(V, missing_frac) for _ in range(N)]
-    As = [true_model.generate(keep=True, mask=mask) for mask in masks]
-    true_ll = true_model.log_likelihood()
-    true_hll = true_model.heldout_log_likelihood()
-
-    def fit(model):
-        print("Fitting ", model)
-        lls = []
-        hlls = []
-        ms = []
-        for itr in range(N_itr):
-            if itr % 10 == 0:
-                print("Iteration ", itr, " / ", N_itr)
-            model.resample()
-            lls.append(model.log_likelihood())
-            hlls.append(model.heldout_log_likelihood())
-            ms.append(model.ms)
-        return np.array(lls), np.array(hlls), np.array(ms)
-
-    # Fit the data with a standard LSM
-    standard_lsm = LatentSpaceModel(V, K, sigmasq_b=sigmasq_b)
-    for A, mask in zip(As, masks):
-        standard_lsm.add_data(A, mask=mask)
-    standard_lsm_lls, standard_lsm_hlls, standard_lsm_ms = fit(standard_lsm)
-
-    # Fit the data with a mixture of LSMs
-    mixture_lsm = MixtureOfLatentSpaceModels(V, 2*K, H=2, sigmasq_b=sigmasq_b)
-    for A, mask in zip(As, masks):
-        mixture_lsm.add_data(A, mask=mask)
-    mixture_lsm_lls, mixture_lsm_hlls, mixture_lsm_ms = fit(mixture_lsm)
-
-    # Fit the data with a factorial LSM
-    factorial_lsm = FactorialLatentSpaceModel(V, K, sigmasq_b=sigmasq_b)
-    for A, mask in zip(As, masks):
-        factorial_lsm.add_data(A, mask=mask)
-    factorial_lsm_lls, factorial_lsm_hlls, factorial_lsm_ms = fit(factorial_lsm)
-
-    # Plot the results
-    plt.figure(figsize=(12, 4))
-    plt.subplot(141)
-    plt.imshow(true_model.edge_probabilities(0), vmin=0, vmax=1, interpolation="nearest")
-    plt.title("True Edge Probabilities")
-    plt.subplot(142)
-    plt.imshow(standard_lsm.edge_probabilities(0), vmin=0, vmax=1, interpolation="nearest")
-    plt.title("Std LSM Edge Probabilities")
-    plt.subplot(143)
-    plt.imshow(mixture_lsm.edge_probabilities(0), vmin=0, vmax=1, interpolation="nearest")
-    plt.title("Mixture LSM Edge Probabilities")
-    plt.subplot(144)
-    plt.imshow(factorial_lsm.edge_probabilities(0), vmin=0, vmax=1, interpolation="nearest")
-    plt.title("Factorial LSM Edge Probabilities")
-
-    plt.figure()
-    plt.plot(standard_lsm_lls, label="Standard LSM")
-    plt.plot(mixture_lsm_lls, label="Mixture of LSMs")
-    plt.plot(factorial_lsm_lls, label="Factorial LSM")
-    plt.plot([0, N_itr-1], true_ll * np.ones(2), ':k', label="True LSM")
-    plt.xlabel("Iteration")
-    plt.ylabel("Log Likelihood")
-    plt.legend(loc="lower right")
-
-    plt.figure()
-    plt.plot(standard_lsm_hlls, label="Standard LSM")
-    plt.plot(mixture_lsm_hlls, label="Mixture of LSMs")
-    plt.plot(factorial_lsm_hlls, label="Factorial LSM")
-    plt.plot([0, N_itr - 1], true_hll * np.ones(2), ':k', label="True LSM")
-    plt.xlabel("Iteration")
-    plt.ylabel("Heldout Log Likelihood")
-    plt.legend(loc="lower right")
-    plt.show()
-
-
-if __name__ == "__main__":
-    missing_frac = 0.25
-    N_itr = 50
-    H = 20
-    K = 10
-    sigmasq_b = 1.0
-
-    # Load the KKI-42 dataset
-    datapath = os.path.join("..", "data", "kki-42-data.pkl")
-    assert os.path.exists(datapath)
-    with open(datapath, "rb") as f:
-        As = pickle.load(f)
-
-    N, Vorig, _ = As.shape
-    assert N == 42 and Vorig == 70 and As.shape[2] == Vorig
-    bad_indices = [0, 35]
-    good_indices = np.array(sorted(list(set(np.arange(Vorig)) - set(bad_indices))))
-    As = As[np.ix_(np.arange(N), good_indices, good_indices)]
-    V = Vorig - len(bad_indices)
-
-    # Sample random masks
-    masks = [random_mask(V, missing_frac) for _ in range(N)]
-
-    def fit(model, name):
-        print("Fitting ", name)
-        lls = []
-        hlls = []
-        ms = []
-        for itr in range(N_itr):
-            if itr % 5 == 0:
-                print("Iteration ", itr, " / ", N_itr)
-            model.resample()
-            lls.append(model.log_likelihood())
-            hlls.append(model.heldout_log_likelihood())
-            ms.append(model.ms)
-        return np.array(lls), np.array(hlls), np.array(ms)
-
-    Ks = [1, 2, 4, 6, 8, 10]
-    experiments = []
-
-    # Baseline: only include the bias term
-    experiments.append((LatentSpaceModel(V, 0), "Bernoulli", "black"))
-
-    # Standard Latent Space Models
-    greens = get_cmap("Greens")
-    for K in Ks:
-        model = LatentSpaceModel(V, K, sigmasq_b=sigmasq_b)
-        name = "standard_lsm_K{}".format(K)
-        color = greens((1.0 + K) / 11.0)
-        experiments.append((model, name, color))
-
-    # Mixture of Latent Space Models
-    reds = get_cmap("Reds")
-    for K in Ks:
-        model = MixtureOfLatentSpaceModels(V, K*H, H=H, sigmasq_b=sigmasq_b)
-        name = "mixture_lsm_K{}_H{}".format(K, H)
-        color = reds((1.0 + K) / 11.0)
-        experiments.append((model, name, color))
-
-    # Factorial Latent Space Models
-    blues = get_cmap("Blues")
-    for K in Ks:
-        model = FactorialLatentSpaceModel(V, K, sigmasq_b=sigmasq_b, alpha=1 + K / 2.0)
-        name = "factorial_lsm_K{}".format(K)
-        color = blues((1.0 + K) / 11.0)
-        experiments.append((model, name, color))
-
-    # Fit the models
-    results = []
-    for model, name, _ in experiments:
-        for A, mask in zip(As, masks):
-            model.add_data(A, mask=mask)
-        results.append(fit(model, name))
-
-    # Plot the results
-    plt.figure()
-    for (model, name, color), result in zip(experiments, results):
-        lls, hlls, ms = result
-        plt.plot(lls, label=name, color=color)
-    plt.xlabel("Iteration")
-    plt.ylabel("Log Likelihood")
-    plt.legend(loc="lower right")
-
-    plt.figure()
-    for (model, name, color), result in zip(experiments, results):
-        lls, hlls, ms = result
-        plt.plot(hlls, label=name, color=color)
-    plt.xlabel("Iteration")
-    plt.ylabel("Heldout Log Likelihood")
-    plt.legend(loc="lower right")
-    plt.show()
-
-    # Now as a bar chart
-    baseline_ll, baseline_hll, _ = results[0]
-    baseline_ll = np.mean(baseline_ll[N_itr//2:])
-    baseline_hll = np.mean(baseline_hll[N_itr//2:])
-
-    plt.figure()
-    for i, ((model, name, color), result) in enumerate(zip(experiments[1:], results[1:])):
-        lls, hlls, ms = result
-        plt.bar(i, np.mean(lls[N_itr // 2:]) - baseline_ll, color=color)
-    plt.ylabel("Log Likelihood")
-    plt.xticks(np.arange(len(experiments)-1), [e[1] for e in experiments[1:]], rotation=90)
-
-    plt.figure()
-    for i, ((model, name, color), result) in enumerate(zip(experiments[1:], results[1:])):
-        lls, hlls, ms = result
-        plt.bar(i, np.mean(hlls[N_itr//2:]) - baseline_hll, color=color)
-    plt.ylabel("Heldout Log Likelihood")
-    plt.xticks(np.arange(len(experiments) - 1), [e[1] for e in experiments[1:]], rotation=90)
-    plt.show()
-
-
