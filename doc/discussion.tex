@@ -123,7 +123,7 @@ updates as well, making the overall algorithm highly efficient.
 \section{A Factorial Generalization}
 Mixture models are but one of many types of latent structure that may
 underlie a population of data.  A mixture model attributes each data point
-(here, each network) is attributed to one mixture component, and given
+(here, each network) to one mixture component, and given
 this assignment, the likelihood is a function of that component's
 parameters (here, the latent embeddings).  Feature-based models offer
 an alternative generative story, where each data point possesses a
@@ -287,7 +287,7 @@ network.)
 
 We assessed the convergence of the Gibbs sampler by visually inspecting
 the likelihood of the training data. We found that the samplers converged 
-in less than~$100$ iterations for all models. Thus, we fit each model
+in fewer than~$100$ iterations for all models. Thus, we fit each model
 with~$500$ iterations of Gibbs sampling, and computed training and test
 likelihood 
 estimates by averaging over the last~$250$ iterations.
