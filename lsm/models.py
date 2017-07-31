@@ -1,5 +1,5 @@
 """
-Latent space models and their generalizations.
+Latent space models and a few generalizations.
 
 Scott Linderman.  June 2017.
 """

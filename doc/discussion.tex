@@ -20,37 +20,38 @@ by Durante, Dunson, and Vogelstein}
 
 \section{Introduction}
 
-We congratulate the authors on their excellent paper.  While the of
-modeling \emph{single} networks has received much attention, we agree
+We congratulate the authors on their excellent paper.  While the
+modeling of \emph{single} networks has received much attention, we agree
 with the authors that the modeling of \emph{populations} of
 networks has been largely overlooked.  Given that such data are
 increasingly common in fields such as neuroscience, this paper makes a
 timely contribution.  In this discussion, we consider a factorial
-generalization of the mixture of latent space models proposed by
-\citet{durante2016nonparametric}, and we suggest cases in which factorial
+generalization of the proposed mixture of latent space models,
+and we suggest cases in which factorial
 models may naturally capture our intuition about the
-underlying generative process. We compare these two models using the
+underlying generative process of the data. We compare these two models using the
 human brain data studied in the main paper, and we suggest some
 avenues for future work.  Code to reproduce the figures in this
 discussion is available
 at~\url{https://github.com/blei-lab/factorial-network-models}.
 
 \section{Model}
-\todo{look at Miller, Jordan, Griffiths -- Nonparametric latent feature models for link prediction}
-\citet{durante2016nonparametric} propose a probabilistic model for
-populations of networks, which, in their simplest form, may be
-represented as binary adjacency matrices.  Let~$\{\bA_n\}_{n=1}^N$
-denote a collection of such matrices, with
+\todo{look at Miller, Jordan, Griffiths -- Nonparametric latent
+  feature models for link prediction}
+\citet{durante2016nonparametric}
+propose a probabilistic model for populations of networks, which may
+be represented as collections of binary adjacency matrices.
+Let~$\{\bA_n\}_{n=1}^N$ denote such a collection, with
 each~${A_n \in \{0,1\}^{V \times V}}$ representing the observed
-connectivity of the~$n$-th network.  ${A_{n,[u,v]}=1}$ indicates that
-an edge is observed from vertex~$u$ to vertex~$v$ in network~$n$.  In
-this framework, we assume the~$V$ vertices are the same in all~$N$
-networks.  Moreover, these networks are assumed to be
+connectivity of the~$n$-th network.  Entry~${A_{n,[u,v]}}$ is equal to
+one edge if an edge is observed from vertex~$u$ to vertex~$v$ in
+network~$n$, otherwise it is set to zero.  We assume the~$V$ vertices
+are the same in all~$N$ networks.  Moreover, the networks are
 undirected~(${A_{n,[u,v]} \equiv A_{n,[v,u]}}$) and without
 self-loops~(${A_{n,[v,v]} \equiv 0}$). Thus, it suffices to model only
 the lower triangular entries.
 
-The authors build upon the latent space model (LSM), a canonical model
+The authors build on the latent space model (LSM), a canonical model
 in probabilistic network analysis \citep{hoff2002latent,
   hoff2008modeling}. An LSM is defined by the following parameters and
 latent variables: a bias~${z_{u,v} \in \reals}$ for each edge; an
@@ -61,7 +62,7 @@ determines the relative importance of the~$D$ latent dimensions.  For
 convenience, let~${\bZ = \{\{z_{u,v}\}_{u=1}^V\}_{v=1}^{u-1}}$ denote
 the set of per-connection biases.  Given these parameters and latent
 variables, the edges are conditionally independent Bernoulli random
-variables, and the likelihood of a network is given by,
+variables, and the likelihood of a network is,
 \begin{align}
   p(\bA_{n} \given \bZ, \{\bx_v\}_{v=1}^V, \bLambda)
   &= \prod_{u=1}^V \prod_{v=1}^{u-1} \distBernoulli \left(A_{n, [u,v]} \given
@@ -69,22 +70,20 @@ variables, and the likelihood of a network is given by,
 \end{align}
 where~${\distBernoulli(y \given \rho) = \rho^y (1-\rho)^{1-y}}$ is the Bernoulli likelihood function
 and~${\sigma(x) = (1+e^{-x})^{-1}}$ is the logistic function.
-Clearly, the per-connection bias terms are only warranted
-~when~${N > 1}$; otherwise, the model is over-parameterized.
+The per-connection bias terms are only warranted
+when~${N > 1}$; otherwise, the model is over-parameterized.
 On top of this bias, the probability of connection between vertices~$u$
 and~$v$ increases with the inner product between their embeddings~$\bx_u$
-and~$\bx_v$, weighted by the matrix~$\bLambda$. Thus, the LSM is akin
-to a low-rank model of connection probability. 
+and~$\bx_v$, weighted by the matrix~$\bLambda$. Thus, the LSM is a low-rank model of connection log-odds.
 
-While LSM's are capable of modeling a variety of individual network
-structures---simple Erd\H{o}s-R\'{e}nyi
-networks~\citep{erdos1959random}, small-world
+LSM's can model a variety of individual network structures---simple
+Erd\H{o}s-R\'{e}nyi networks~\citep{erdos1959random}, small-world
 networks~\citep{watts1998collective}, scale-free
 networks~\citep{barabasi1999emergence}, stochastic block
-models~\citep{nowicki2001estimation, airoldi2008mixed}, and more---a
+models~\citep{nowicki2001estimation, airoldi2008mixed}.  But a
 population of networks may exhibit a diversity of such connectivity
-patterns.  Mixtures of latent space models, as suggested
-by~\citet{durante2016nonparametric}, are naturally suited to this type
+patterns.  The \emph{mixture of latent space models} (MoLSM), as suggested
+by~\citet{durante2016nonparametric}, is naturally suited to this type
 of heterogeneous data.
 
 Now let there
@@ -93,8 +92,7 @@ a unique set of vertex embeddings~${\bx_v^{(h)} \in \reals^D}$
 and its own scaling factor~$\blambda^{(h)}$. Furthermore,
 let~${h_n \in \{1, \ldots, H\}}$ denote the mixture component
 to which the~$n$-th network is attributed. 
-The likelihood of a network is then
-given by,
+The likelihood of a network is then,
 \begin{align}
   \label{eq:molsm_lkhd}
   p \left(\bA_n \given
@@ -113,14 +111,13 @@ inverse gamma (MIG) prior on~$\blambda^{(h_n)}$,
   \nu_d^{(h)} &\sim \distGamma(a_2, 1).
 \end{align}
 This prior has the effect of pushing~$\lambda_d^{(h)}$ toward zero
-for larger values of~$d$, and thereby incentivizing the model to use
-as few dimensions as possible. By tuning~$a_1$ and~$a_2$, we can adjust
+for larger values of~$d$; it incentivizes the model to use
+as few dimensions as possible. Tuning~$a_1$ and~$a_2$ adjusts
 the strength of this prior.
 
-\citet{durante2016nonparametric} use
-P\'{o}lya-gamma augmentation to develop an
-efficient Gibbs sampling algorithm for posterior inference in the case
-where~$\bx_v^{(h)}$ and~$z_{u,v}$ have Gaussian prior distributions. 
+For posterior inference in the MoLSM, \citet{durante2016nonparametric} use
+P\'{o}lya-gamma augmentation to develop a Gibbs sampler 
+when~$\bx_v^{(h)}$ and~$z_{u,v}$ have Gaussian priors. 
 While the Bernoulli likelihoods are not conjugate with these Gaussian
 priors, conditioning on the P\'{o}lya-gamma auxiliary variables renders them so.
 These auxiliary variables have straightforward and na\"{i}vely parallelizable
@@ -128,25 +125,21 @@ updates as well, making the overall algorithm highly efficient.
 
 \section{A Factorial Generalization}
 Mixture models are but one of many types of latent structure that may
-underlie a population of data.  Under a mixture model, each data-point
+underlie a population of data.  A mixture model attributes each data point
 (here, each network) is attributed to one mixture component, and given
 this assignment, the likelihood is a function of that component's
 parameters (here, the latent embeddings).  Feature-based models offer
-an alternative generative story in which each data-point possesses a
+an alternative generative story, where each data point possesses a
 set of features, and the likelihood is a function of the parameters
-associated with those features.  For example, in latent Dirichlet
-allocation~\citep{blei2003latent}, the latent features are
-topics---distributions over words---and each document is characterized
-by a convex combination of topics.  In \emph{factorial} feature models
+associated with those features.  In \emph{factorial} feature models
 \citep{ghahramani1995factorial, ghahramani1996factorial,
-  meeds2007modeling, ghahramani2007bayesian}, the features are
+  meeds2007modeling, ghahramani2007bayesian, miller2009nonparametric}, the features are
 discrete, and in the simplest case, binary.  This offers a intuitive
-interpretation: each data-point possesses a subset of possible features
-which contribute to its likelihood.  We will show how such a feature
-based, factorial model can be derived from the mixture model presented
-by~\citep{durante2016nonparametric}.
+interpretation: each data point possesses a subset of possible features
+that contribute to its likelihood.  We derive a feature
+based, factorial model from the MoLSM.
 
-Consider the space formed by combining the embeddings and scalings of
+Consider the embeddings and scalings of
 the~$H$ mixture components.  Specifically, let
 \begin{align}
   \widetilde{\bx}_v &= \left[\bx_v^{(1)^\trans}, \ldots, \bx_v^{(H)^\trans}\right]^\trans, \\
@@ -154,18 +147,19 @@ the~$H$ mixture components.  Specifically, let
 \end{align}
 denote column vectors in~$\reals^{D \cdot H}$ formed by concatenating the
 embeddings and scaling factors of each mixture component, respectively.
-Then, introduce a ``mask'' vector for each network defined by,
+Then, introduce a ``mask'' vector for each network defined by
 \begin{align}
-  \widetilde{\bbm}_n &= \left[ \bbI[h_n=1] \cdot \bone_D^\trans, \ldots, \bbI[h_n=H] \cdot \bone_D^\trans \right]^\trans,
+  \widetilde{\bbm}_n &= \left[ \bbI[h_n=1] \cdot \bone_D^\trans, \ldots, \bbI[h_n=H] \cdot \bone_D^\trans \right]^\trans.
 \end{align}
-where~$\bbI[\cdot]$ is an indicator that evaluates to one if its
+Here~$\bbI[\cdot]$ is an indicator that evaluates to one if its
 argument is true and zero otherwise, and~$\bone_D$ is a column vector
 of length~$D$ filled with ones. The mask vector represents
 the mixture component~$h_n$ as a
 vector with exactly~$D$ ones in the coordinates corresponding
 to~$\bx_v^{(h_n)}$ and~$\blambda^{(h_n)}$. The likelihood in Eq.~\eqref{eq:molsm_lkhd} can now
-be equivalently expressed as,
+be equivalently expressed as
 \begin{align}
+  \label{eq:flsm_lkhd}
   p \left(\bA_n \given
   \bZ, \{\widetilde{\bx}_v\}_{v=1}^V,
   \widetilde{\blambda}, h_n \right) 
@@ -179,7 +173,7 @@ where~$\odot$ denotes element-wise multiplication. The mask effectively
 turns on or off certain dimensions of the latent space according to
 the network's mixture assignment~$h_n$.
 
-This suggests an obvious extension: rather than restricting the model
+This suggests an extension: rather than restricting the model
 to exactly~$H$ unique masks, instead allow each network to take on any
 of the~$2^{D \cdot H}$ possible binary masks. More generally, let~$K$
 denote the total number of latent factors (so far~${K=D \cdot
@@ -190,9 +184,9 @@ model, in which only~$H$ different subsets of factors are allowed, here any
 possible combination of factors can be chosen, making this a strict
 generalization of the mixture model.  Moreover, with more flexibility
 in the choice of subset, it is likely that~${K < D \cdot H}$
-dimensions will suffice for this \emph{factorial latent space model}.
+dimensions will suffice. We call this the \emph{factorial latent space model} (fLSM).
 
-In the finite~$K$ case, a natural prior is
+With finite~$K$, a natural prior is
 \begin{align}
   \label{eq:prior_m}
   p(\widetilde{\bbm}_n \given \{\rho_k\}_{k=1}^K)
@@ -212,7 +206,7 @@ Intuitively, each new network has nonzero probability of introducing a
 new latent factor, i.e. of increasing the dimensionality of the
 embeddings.
 
-Posterior inference in the factorial model requires slight
+Posterior inference in the factorial model requires
 modifications to the mixture model inference algorithm. Rather than
 sampling a mixture identity~$h_n$ for each network, we now must sample
 the binary mask~$\widetilde{\bbm}_n$. Assuming a large but finite
@@ -221,25 +215,25 @@ by~\citet{durante2016nonparametric}---we may Gibbs sample each
 coordinate of the mask vector~$\widetilde{m}_{n,k}$ holding the
 remainder~$\widetilde{\bbm}_{n,\neg k}$ fixed.  These conditionals are
 of the same form as the class conditional probabilities in the mixture
-model:
+model,
 \begin{multline}
   p(\widetilde{m}_{n,k} \given \widetilde{\bbm}_{n, \neg k}, \bA_n, \bZ,
   \{\widetilde{\bx}_v\}_{v=1}^V, \widetilde{\blambda},\rho_k) 
   \propto \distBernoulli(\widetilde{m}_{n,k} \given \rho_k) \times
   p\left(\bA_n \given
   \bZ, \{\widetilde{\bx}_v\}_{v=1}^V,
-  \widetilde{\blambda}, \widetilde{\bbm}_n \right) 
+  \widetilde{\blambda}, \widetilde{\bbm}_n \right).
 \end{multline}
 In sampling the binary masks, we effectively sample the number of
 factors active in a network.  Thus, sparsity inducing priors
-on~$\widetilde{\lambda}_k$ are no longer necessary as they are
+on~$\widetilde{\lambda}_k$ are no longer necessary. They are
 superseded by the binary masks.
 
 Of course, we also pay a computational cost in generalizing from
 mixtures to factorial models.  In the mixture model, the conditional
 distribution of~$h_n$ could be computed exactly, but the conditional
 distribution of~$\widetilde{\bbm}_n$ in the factorial model may take
-on~$2^K$ values, which will generally be intractable.  One concern is
+on~$2^K$ values, which will generally be intractable.  Another concern is
 that the coordinate-wise Gibbs sampler proposed above will suffer poor
 mixing. For example,~$\widetilde{m}_{n,k}$ may be highly correlated
 with~$\{\widetilde{x}_{v,k}\}_{v=1}^V$, making it hard to turn off or
@@ -250,7 +244,8 @@ concern by integrating out the embeddings when sampling the binary
 masks; such a collapsed sampler would also benefit the mixture model.
 Unfortunately, due to the quadratic form in the edge probabilities,
 this marginalization does not appear to be straightforward, even after
-P\'{o}lya-gamma augmentation.
+P\'{o}lya-gamma augmentation.  In the experiments below, we find that
+the standard, uncollapsed Gibbs sampler suffices for these data. 
 
 \section{Experiments}
 
@@ -265,15 +260,15 @@ P\'{o}lya-gamma augmentation.
     performance is comparable to the LSM.  The factorial LSM (fLSM)
     achieves high test performance by sharing embeddings across the
     entire population while letting individual networks use only a subset
-    of the dimensions.}}
+    of the dimensions. Error bars denote~$\pm 1$ standard deviation.}}
 \label{fig:lls}
 \end{figure}
 
 
 We compared the performance of the standard latent space model (LSM),
 the mixture of latent space models (MoLSM), and the proposed factorial
-generalization (fLSM) using the publicly available brain connectivity
-data studied by~\citet{durante2016nonparametric}. This dataset
+generalization (fLSM). We studied the same brain connectivity
+data as~\citet{durante2016nonparametric}. This dataset
 contains ${N=42}$ networks, each with~${V=68}$ vertices.  We held
 out~$24062$ randomly chosen edges for testing---approximately~$25\%$ of the
 ${\tfrac{1}{2}NV(V-1) = 95676}$ total number of edges---and trained
@@ -289,38 +284,48 @@ dimensions per component from~$D=2$ to~$D=20$.  Thus, the MoLSM has
 effectively ten times as many dimensions at its disposal, but
 any given network may still only use~$D$ latent factors. Finally, we also
 studied the effect of the multiplicative inverse gamma (MIG) prior for the
-LSM and the MoLSM (as argued above, the fLSM already benefits from a
+LSM and the MoLSM. (As argued above, the fLSM already benefits from a
 sparsity inducing prior on the number of components used by any
-network). 
+network.)
 
-We fit each model with~$500$ iterations of Gibbs sampling, and the likelihood
-estimates are averaged over the last~$250$ iterations. All models
-appear to converge in at most~$100$ iterations, with the fLSM
-sometimes exhibiting jumps in likelihood  early in training.
+We assessed the convergence of the Gibbs sampler by visually inspecting
+the likelihood of the training data. We found that the samplers converged 
+in less than~$100$ iterations for all models. Thus, we fit each model
+with~$500$ iterations of Gibbs sampling, and computed training and test
+likelihood 
+estimates by averaging over the last~$250$ iterations.
+For
+each sample of the latent variables and parameters ($\bZ$,
+$\{\widetilde{\bx}_b\}_{v=1}^V$, etc.), we computed the log
+likelihood~\eqref{eq:flsm_lkhd} for both the training and test
+data, subtracted the corresponding log likelihood under an independent
+Bernoulli model, and normalized by the number of entries in the training
+and test data, respectively. 
 The MIG hyperparameters were set to~$a_1=3.5$ and~$a_2=2.5$, and the
-mixture models were initialized with k-means clustering. The fLSM
+mixture models were initialized with k-means clustering, as in~\citet{durante2016nonparametric}. The fLSM
 hyperparameter was set to~${\alpha = \tfrac{K}{2}+1}$, such that the
 prior probability of each feature is about~$\tfrac{1}{3}$ in expectation.
 
-Figure~\ref{fig:lls} shows the training and test log likelihoods
-relative to the Bernoulli baseline, measured in nats. As expected, the
-standard LSM shows continued improvement in training log likelihood as
-the number of dimensions increases (red), though the test likelihood
-plateaus after about 10 dimensions. Incorporating an MIG prior biases
-the model toward using fewer components, and we see that this additional
-regularization is unnecessary for the standard LSM on this dataset (blue).
-By contrast, the mixture model shows severe over-fitting in the absence
-of regularization (yellow).  Recall that here we are varying the number
+Figure~\ref{fig:lls} shows the log likelihoods of the training and
+test data relative to the Bernoulli baseline. The standard LSM shows continued
+improvement in training log likelihood as the number of dimensions
+increases (red), though the test likelihood plateaus after about 10
+dimensions. Incorporating an MIG prior biases the model toward using
+fewer components, and we see that this additional regularization is
+unnecessary for the standard LSM on this dataset (blue).  By contrast,
+the mixture model shows severe over-fitting in the absence of
+regularization (yellow).  Recall that here we are varying the number
 of dimensions per component, and there are ten components total.  Some
-mixture components only have two to five networks assigned to
-them, which is insufficient to accurately infer the embedding without over-fitting.
-With an MIG prior, the MoLSM no longer exhibits this over-fitting, but
-the test likelihoods are only comparable to that of the standard LSM.
-Finally, the fLSM seems to strike a nice balance.  By allowing factors
-to be ``turned off'' in some networks, it allows network-to-network
-variability while forcing parameter sharing across the population. This
-results in the highest performance: the baseline performance is~$76.5\%$
-accuracy on test data, and a 0.05 nat improvement yields~$80.5\%$ accuracy. 
+mixture components only have two to five networks assigned to them,
+which is insufficient to accurately infer the embedding.  With an MIG
+prior, the MoLSM no longer exhibits this over-fitting, but the test
+likelihoods are only comparable to that of the standard LSM.  Finally,
+the fLSM seems to strike a nice balance.  By allowing factors to be
+``turned off'' in some networks, it allows network-to-network
+variability while forcing parameter sharing across the
+population. This results in the highest performance: the baseline
+performance is~$76.5\%$ accuracy on test data, and a 0.05 nat
+improvement yields~$80.5\%$ accuracy.
 
 
 \begin{figure}[t]
@@ -348,33 +353,32 @@ where~${\bar{\bx}_k = \left[ \widetilde{x}_{1,k}, \ldots, \widetilde{x}_{V,k} \r
 We see that the first twelve factors are employed by almost all networks,
 but the latter factors are more variable.  Of course, they are also
 lower magnitude, and hence have a lesser impact on the resulting edge
-probabilities.  Thus, this variability likely reflects some heterogeneity
-in the population as well as some posterior uncertainty.
+probabilities.  This variability likely reflects both heterogeneity
+in the population and posterior uncertainty.
 
 The right panels of Figure~\ref{fig:factors} show the average network
 (similar to Figure~9 of~\citet{durante2016nonparametric}) and then the
 contributions of a few of the individual factors, i.e.~${\bar{\bx}_k \bar{\bx}_k^\trans}$.
 Intuitively, the fLSM models the log-odds of a binary adjacency matrix
 by summing a subset of these contributions.  We have not attempted to
-read into these factors, but it is interesting to note how the strong
-block structure emerges from the sum of individual factors.  A natural
+read into these factors, but note how the strong
+block structure emerges from the sum of individual factors.  One
 next step would be to compare factor usage to other covariates of the
-patients.  One would expect that differences in network connectivity
+patients.  We expect that differences in network connectivity
 arising from the features of an individual patient (age, disease history,
 etc.) would be reflected in differences in factor usage as well.
 
 \section{Conclusion}
 \citet{durante2016nonparametric} present a mixture of latent space
 models for capturing low-dimensional structure in populations of
-networks.  Mixing over latent embeddings naturally handles network-to-network
+networks.  Mixing over latent embeddings handles network-to-network
 variability within the population and provides promising results
 compared to other hierarchical models that assume a single set of
-edge probabilities across all networks.  Moreover, their Bayesian
+edge probabilities across all networks.  Their Bayesian
 nonparametric approach allows flexible inference of the number of
 mixture components and latent dimensions in a data-driven manner.
-We commend them on their work.
 
-We present a straightforward generalization from their mixture
+We present a generalization from the mixture
 model to a factorial model in which the population of
 networks share a set of latent factors, but only a subset of those
 factors actively determine edge probabilities for any given network.
@@ -383,33 +387,32 @@ that a set of latent features determines the probability of fiber
 tracts between two brain regions (e.g. age, diseases, drug use), and
 each patient may possess a different subset of these features. By contrast,
 the mixture model postulates a collection of different ``types'' of
-patients, each with characteristic patterns of connectivity.  Clearly
-these two models are quite similar, but they may yield different
+patients, each with characteristic patterns of connectivity.
+These two models are similar, but they may yield different
 insights into the population of networks under study.
 
 This suggests a number of avenues for future work.  In many cases, the
-network itself is not directly observable; rather, we often have
+network itself is not directly observable; rather, we have
 access to only indirect measurements, like neural spike trains, which
 provide statistical information about the presence or absence of an
-edge between two vertices.  In these cases, we would ideally like to
+edge between two vertices.  In these cases, we would like to
 perform joint inference of the network \emph{and} its underlying
 structure, as in \citet{linderman2014discovering}
 and~\citet{linderman2016bayesian}.  In other experiments, like
 longitudinal studies of brain connectivity, the observed networks are
 not exchangeable draws from a latent mixture or factor model, but
 rather a sequence of observations that we expect to be correlated over
-time, as in other dynamic feature
-models~\citep[e.g.][]{blei2006dynamic} and dynamic network
+time, as in other dynamic network
 models~\citep[e.g.][]{bassett2011dynamic, linderman2014framework}.
 Likewise, while~\citet{durante2016nonparametric} mix
 over complete network models, a natural alternative is to mix over
 per-edge probabilities, as in the mixed-membership stochastic block
 model~\citep{airoldi2008mixed}. In such models, each vertex pair
-has an associated pair of latent, discrete ``roles'', and the probability
+has an associated pair of latent discrete ``roles'', and the probability
 of connection is a function of these underlying roles.  
 Finally, as the authors mention, scaling inference to larger networks
-is another clear area for future work, and variational inference
-algorithms could be well suited to this challenge. 
+is another area for future work. Variational inference
+algorithms could be well suited to this challenge~\citep{jordan1999introduction, blei2017variational}. 
 
 
 \bibliographystyle{apa}
