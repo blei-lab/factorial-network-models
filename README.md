@@ -15,7 +15,7 @@ While the modeling of _single_ networks has received much attention, we agree wi
 
 
 ### Installation
-First, make sure you have (pypolyagamma)[https://github.com/slinderman/pypolyagamma] installed.  This can be done with `pip` or by source. See the link above for detailed installation instructions.
+First, make sure you have [pypolyagamma](https://github.com/slinderman/pypolyagamma) installed.  This can be done with `pip` or by source. See the link above for detailed installation instructions.
 
 Then,
 ```
