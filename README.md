@@ -1,5 +1,5 @@
 # Factorial Network Models
-A discussion of "Nonparametric Bayes Modeling of Populations of Networks" by Durante et al. (2016).
+A discussion of "Nonparametric Bayes Modeling of Populations of Networks" by Durante, Dunson, and Vogelstein (2016).
 
 _Scott W. Linderman and David M. Blei_
 
@@ -15,7 +15,7 @@ While the modeling of _single_ networks has received much attention, we agree wi
 
 
 ### Installation
-First, make sure you have (pypolyagamma)[https://github.com/slinderman/pypolyagamma] installed.  This can be done with `pip` or by source. See the link above for detailed installation instructions.
+First, make sure you have [pypolyagamma](https://github.com/slinderman/pypolyagamma) installed.  This can be done with `pip` or by source. See the link above for detailed installation instructions.
 
 Then,
 ```
@@ -24,3 +24,5 @@ cd factorial-network-models
 pip install -e .
 ```
 
+### References
+Durante, Daniele, David B. Dunson, and Joshua T. Vogelstein. "Nonparametric Bayes modeling of populations of networks." Journal of the American Statistical Association (2016).
