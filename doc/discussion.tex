@@ -37,11 +37,10 @@ at~\url{https://github.com/blei-lab/factorial-network-models}.
 
 \section{Model}
 \citet{durante2016nonparametric}
-propose a probabilistic model for populations of networks, which may
-be represented as collections of binary adjacency matrices.
-Let~$\{\bA_n\}_{n=1}^N$ denote such a collection, with
-each~${A_n \in \{0,1\}^{V \times V}}$ representing the observed
-connectivity of the~$n$-th network.  Entry~${A_{n,[u,v]}}$ is equal to
+propose a probabilistic model for populations of networks. These populations
+may be represented as collections of binary adjacency matrices,~$\{\bA_n\}_{n=1}^N$,
+where matrix~${\bA_n \in \{0,1\}^{V \times V}}$ represents the
+connectivity of the~$n$-th network.  Entry~${A_{n,[u,v]}}$ is set to
 one edge if an edge is observed from vertex~$u$ to vertex~$v$ in
 network~$n$, otherwise it is set to zero.  We assume the~$V$ vertices
 are the same in all~$N$ networks.  Moreover, the networks are
@@ -77,8 +76,8 @@ and~$\bx_v$, weighted by the matrix~$\bLambda$. Thus, the LSM is a low-rank mode
 LSM's can model a variety of individual network structures---simple
 Erd\H{o}s-R\'{e}nyi networks~\citep{erdos1959random}, small-world
 networks~\citep{watts1998collective}, scale-free
-networks~\citep{barabasi1999emergence}, stochastic block
-models~\citep{nowicki2001estimation, airoldi2008mixed}.  But a
+networks~\citep{barabasi1999emergence}, and stochastic block
+models~\citep{nowicki2001estimation}.  But a
 population of networks may exhibit a diversity of such connectivity
 patterns.  The \emph{mixture of latent space models} (MoLSM), as suggested
 by~\citet{durante2016nonparametric}, is naturally suited to this type
@@ -242,8 +241,8 @@ concern by integrating out the embeddings when sampling the binary
 masks; such a collapsed sampler would also benefit the mixture model.
 Unfortunately, due to the quadratic form in the edge probabilities,
 this marginalization does not appear to be straightforward, even after
-P\'{o}lya-gamma augmentation.  In the experiments below, we find that
-the standard, uncollapsed Gibbs sampler suffices for these data. 
+P\'{o}lya-gamma augmentation.  In the experiments below, however, we find that
+the simple, uncollapsed Gibbs sampler suffices for these data. 
 
 \section{Experiments}
 
