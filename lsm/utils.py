@@ -5,8 +5,6 @@ import numpy.random as npr
 onehot = lambda x, K: np.arange(K) == x
 logistic = lambda x: 1 / (1 + np.exp(-x))
 
-from hips.plotting.layout import remove_plot_labels
-
 def random_mask(V, missing_frac=0.1):
     mask = npr.rand(V, V) < 1 - missing_frac
     L = np.tril(np.ones((V, V), dtype=bool), k=-1)

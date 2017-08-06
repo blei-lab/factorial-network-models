@@ -6,22 +6,31 @@ Scott Linderman.  June 2017.
 import numpy as np
 import numpy.random as npr
 from scipy.misc import logsumexp
+from scipy.stats import dirichlet, beta
 
 from pypolyagamma import pgdrawvpar, get_omp_num_threads, PyPolyaGamma
 from pypolyagamma.utils import sample_gaussian
 
+from lsm.priors import SharedInvGammaPrior, MultiplicativeInvGammaPrior, MixtureofIGPriors, MixtureofMIGPriors
 from lsm.utils import logistic, onehot
 
 
 class LatentSpaceModel(object):
-    def __init__(self, V, K, X=None, b=None, sigmasq_b=1.0, sigmasq_x=1.0):
+
+    _sigmasq_x_prior_class = SharedInvGammaPrior
+
+    def __init__(self, V, K, X=None, b=None, sigmasq_b=1.0,
+                 sigmasq_prior_prms=None, name=None):
         self.V, self.K = V, K
 
+        # Initialize prior
+        sigmasq_prior_prms = sigmasq_prior_prms if sigmasq_prior_prms is not None else {}
+        self.sigmasq_x_prior = self._sigmasq_x_prior_class(K, **sigmasq_prior_prms)
+        self.sigmasq_b = sigmasq_b
+
         # Initialize parameters
-        self._sigmasq_x = sigmasq_x * np.ones(K)
         self.X = np.sqrt(self.sigmasq_x) * npr.randn(V, K) if X is None else X * np.ones((V, K))
 
-        self.sigmasq_b = sigmasq_b
         self.b = np.zeros((V, V)) if b is None else b * np.ones((V, V))
 
         # Models encapsulate data
@@ -37,9 +46,12 @@ class LatentSpaceModel(object):
         seeds = npr.randint(2 ** 16, size=num_threads)
         self.ppgs = [PyPolyaGamma(seed) for seed in seeds]
 
+        # Name the model
+        self.name = name if name is not None else "lsm_K{}".format(K)
+
     @property
     def sigmasq_x(self):
-        return self._sigmasq_x
+        return self.sigmasq_x_prior.sigmasq
 
     def initialize(self):
         # Initialize latent variables if necessary
@@ -56,12 +68,37 @@ class LatentSpaceModel(object):
 
         mask = mask if mask is not None else np.ones((V, V), dtype=bool)
         assert mask.shape == (V, V) and mask.dtype == bool
+        assert np.all(mask.astype(float) - mask.astype(float).T == 0), "mask must be symmetric!"
         self.masks.append(mask)
 
     def edge_probabilities(self, n):
         p = logistic((self.X * self.ms[n]).dot(self.X.T) + self.b)
         np.fill_diagonal(p, 0)
         return p
+
+    def log_prior(self):
+        # p(X | sigmasq_x)
+        lp = 0
+        # if self.K > 0:
+        #     sigmasq_x, X = self.sigmasq_x, self.X
+        #     lp += -0.5 * np.sum(np.log(2 * np.pi * sigmasq_x)) * self.V
+        #     lp += -0.5 * np.sum(X**2 / sigmasq_x)
+
+        sigmasq_x, X = self.sigmasq_x, self.X
+        for k in range(self.K):
+            ssk = max(sigmasq_x[k], 1e-16)
+            lp += -0.5 * np.sum(np.log(2 * np.pi * ssk)) * self.V
+            lp += -0.5 * np.sum(X[:,k]**2 / ssk)
+
+        # p(b | sigmasq_b)
+        sigmasq_b, b = self.sigmasq_b, self.b
+        L = np.tril(np.ones(b.shape), k=-1)
+        lp += -0.5 * np.log(2 * np.pi * sigmasq_b) * L.sum()
+        lp += -0.5 * np.sum(b**2 * L) / sigmasq_b
+
+        # p(sigmasq_x)
+        lp += self.sigmasq_x_prior.log_prior()
+        return lp
 
     def log_likelihood(self):
         return sum([self._log_likelihood(A, m, mask) for A, m, mask
@@ -76,9 +113,18 @@ class LatentSpaceModel(object):
         psi = self.b + (X * m).dot(X.T)
 
         L = np.tril(np.ones((V, V), dtype=bool), k=-1)
-        ll = np.sum(psi * A * L * mask)
-        ll -= np.sum(np.log1p(np.exp(psi)) * L * mask)
-        return ll
+        ll1 = np.sum(psi * A * L * mask)
+
+        # Compute the log normalizer [-log(1+e^psi)] with logsumexp trick
+        # This is equivalent to:
+        # ll2 = np.sum(np.log1p(np.exp(psi)) * L * mask)
+        lim = np.maximum(psi, 0)
+        ll2 = np.sum((lim + np.log(np.exp(psi - lim) + np.exp(-lim))) * L * mask)
+        # assert np.allclose(ll2, np.sum(np.log1p(np.exp(psi)) * L * mask))
+        return ll1 - ll2
+
+    def log_joint_probability(self):
+        return self.log_prior() + self.log_likelihood()
 
     def generate(self, keep=True, mask=None):
         V, X, b = self.V, self.X, self.b
@@ -100,6 +146,7 @@ class LatentSpaceModel(object):
     def resample(self):
         self._resample_X()
         self._resample_b()
+        self.sigmasq_x_prior.resample(self.X)
 
     def _resample_X(self):
         if self.K == 0:
@@ -150,10 +197,17 @@ class LatentSpaceModel(object):
         post_J = prior_J + lkhd_J
         self.X[v] = sample_gaussian(J=post_J, h=post_h)
 
+        # DEBUG: is the Cholesky in sample_gaussian more unstable than inv?
+        # post_S = np.linalg.inv(post_J)
+        # post_mu = np.dot(post_S, post_h)
+        # self.X[v] = npr.multivariate_normal(post_mu, post_S)
+
     def _resample_b(self):
         V = self.V
 
-        # Sample auxiliary variables
+        # Sample auxiliary variables.
+        # We could be more efficient here since we only need
+        # the lower triangular part.
         XXTs = [(self.X * m).dot(self.X.T) for m in self.ms]
         psis = [self.b + XXT for XXT in XXTs]
         omegas = []
@@ -173,67 +227,20 @@ class LatentSpaceModel(object):
         mu = sigmasq * h
         self.b = mu + np.sqrt(sigmasq) * npr.randn(V, V)
 
-        # Symmetrize
+        # Symmetrize -- only keep lower triangular part
         L = np.tril(np.ones((V, V)), k=-1)
         self.b = self.b * L + self.b.T * L.T
 
 
-class MultiplicativeInvGammaPrior(object):
-    """
-    Shrinkage prior on the scale of the latent embeddings
-    """
-    def __init__(self, K, a1, a2):
-        self.K, self.a1, self.a2 = K, a1, a2
-        self.nu = np.ones(K)
-
-        # Resample from prior to initialize nu
-        self.resample(np.zeros((0, K)))
-
-    @property
-    def sigmasq(self):
-        return 1. / np.cumprod(self.nu)
-
-    def resample(self, X):
-        assert isinstance(X, np.ndarray) and X.ndim == 2 and X.shape[1] == self.K
-        V, K = X.shape
-
-        # Define a helper function to take product of certain fraction of nu's.
-        def theta(m, k):
-            th = 1.0
-            for t in range(m):
-                if t != k:
-                    th *= self.nu[t]
-            return th
-
-        # Resample the nu_1; this one is special
-        a1_post = self.a1 + 0.5 * V * K
-        b1_post = 1.0
-        for i in range(K):
-            b1_post += 0.5 * theta(i, 1) * np.sum(X[:, i]**2)
-        self.nu[0] = npr.gamma(a1_post, 1./b1_post)
-
-        # Resample the nu_k; k >= 2
-        for k in range(1, K):
-            ak_post = self.a2 + 0.5 * V * (K - k)
-            bk_post = 1.0
-            for i in range(k, K):
-                bk_post += 0.5 * theta(i, k) * np.sum(X[:, i] ** 2)
-            self.nu[k] = npr.gamma(ak_post, 1. / bk_post)
-
-
 class LatentSpaceModelWithShrinkage(LatentSpaceModel):
-    def __init__(self, V, K, X=None, b=None, sigmasq_b=1.0, a1=1.0, a2=1.0):
-        self.sigmasq_x_prior = MultiplicativeInvGammaPrior(K, a1, a2)
+
+    _sigmasq_x_prior_class = MultiplicativeInvGammaPrior
+
+    def __init__(self, V, K, X=None, b=None, sigmasq_b=1.0,
+                 sigmasq_prior_prms=None, name=None):
         super(LatentSpaceModelWithShrinkage, self).\
-            __init__(V, K, X=X, b=b, sigmasq_b=sigmasq_b)
-
-    @property
-    def sigmasq_x(self):
-        return self.sigmasq_x_prior.sigmasq
-
-    def resample(self):
-        super(LatentSpaceModelWithShrinkage, self).resample()
-        self.sigmasq_x_prior.resample(self.X)
+            __init__(V, K, X=X, b=b, sigmasq_b=sigmasq_b, sigmasq_prior_prms=sigmasq_prior_prms)
+        self.name = name if name is not None else "lsm_shrink_K{}".format(K)
 
 
 class MixtureOfLatentSpaceModels(LatentSpaceModel):
@@ -241,20 +248,30 @@ class MixtureOfLatentSpaceModels(LatentSpaceModel):
     Extend the simple latent space model with a mixture distribution.
     This can be seen as setting a mask on some of the latent components.
     """
+    _sigmasq_x_prior_class = MixtureofIGPriors
 
-    def __init__(self, V, K, H, X=None, b=None, sigmasq_b=1.0, nu=None, alpha=1.0):
+    def __init__(self, V, K, H, X=None, b=None, sigmasq_b=1.0,
+                 sigmasq_prior_prms=None, name=None,
+                 nu=None, alpha=1.0,):
         """
         Here, K is the total number of factors (D * H)
         """
         assert K % H == 0, "K must be an integer multiple of H"
         self.D = K // H
 
+        # Make sure X is a list of correctly sized arrays
         if X is not None:
             assert isinstance(X, list) and len(X) == H and \
                    np.all([Xh.shape == (V, K) for Xh in X])
             X = np.hstack(X)
 
-        super(MixtureOfLatentSpaceModels, self).__init__(V, K, X=X, b=b, sigmasq_b=sigmasq_b)
+        sigmasq_prior_prms = sigmasq_prior_prms if sigmasq_prior_prms is not None else {}
+        sigmasq_prior_prms["D"] = self.D
+        super(MixtureOfLatentSpaceModels, self).\
+            __init__(V, K, X=X, b=b, sigmasq_b=sigmasq_b,
+                     sigmasq_prior_prms=sigmasq_prior_prms)
+
+        # Initialize the cluster assignments
         self.H = H
         self.hs = []
 
@@ -263,6 +280,16 @@ class MixtureOfLatentSpaceModels(LatentSpaceModel):
         self.nu = nu * np.ones(self.H) if nu is not None else alpha * np.ones(self.H)
         self.nu /= np.sum(self.nu)
         assert self.nu.shape == (self.H,) and np.all(self.nu >= 0)
+
+        self.name = name if name is not None else "molsm_K{}_H{}".format(K, H)
+
+    def log_prior(self):
+        lp = super(MixtureOfLatentSpaceModels, self).log_prior()
+        # p({h} | nu)
+        lp += np.dot(np.bincount(self.hs, minlength=self.H), np.log(1e-16 + self.nu))
+        # p(nu)
+        lp += dirichlet(self.alpha / self.H * np.ones(self.H)).logpdf(1e-16 + self.nu)
+        return lp
 
     def initialize(self):
         # Cluster the adjacency matrices to initialize h
@@ -275,6 +302,7 @@ class MixtureOfLatentSpaceModels(LatentSpaceModel):
         for n, hn in enumerate(km.labels_):
             self.hs[n] = hn
             self.ms[n] = np.repeat(onehot(hn, self.H), self.D)
+        assert np.all(np.sum(self.ms, 0) > 0)
 
     def add_data(self, A, m=None, mask=None, h=None):
         h = h if h is not None else npr.randint(self.H)
@@ -303,8 +331,7 @@ class MixtureOfLatentSpaceModels(LatentSpaceModel):
         return A
 
     def resample(self):
-        self._resample_X()
-        self._resample_b()
+        super(MixtureOfLatentSpaceModels, self).resample()
         self._resample_m()
         self._resample_nu()
 
@@ -325,32 +352,44 @@ class MixtureOfLatentSpaceModels(LatentSpaceModel):
 
 
 class MixtureOfLatentSpaceModelsWithShrinkage(MixtureOfLatentSpaceModels):
-    def __init__(self, V, K, H, X=None, b=None, sigmasq_b=1.0, nu=None, alpha=1.0, a1=1.0, a2=1.0):
-        self.sigmasq_x_priors = [MultiplicativeInvGammaPrior(K // H, a1, a2) for _ in range(H)]
 
+    _sigmasq_x_prior_class = MixtureofMIGPriors
+
+    def __init__(self, V, K, H, X=None, b=None, sigmasq_b=1.0, nu=None,
+                 alpha=1.0, sigmasq_prior_prms=None, name=None):
         super(MixtureOfLatentSpaceModelsWithShrinkage, self).\
-            __init__(V, K, H, X=X, b=b, sigmasq_b=sigmasq_b, nu=nu, alpha=alpha)
-
-    @property
-    def sigmasq_x(self):
-        return np.hstack([prior.sigmasq for prior in self.sigmasq_x_priors])
-
-    def resample(self):
-        super(MixtureOfLatentSpaceModelsWithShrinkage, self).resample()
-
-        # Resample prior
-        for h, prior in enumerate(self.sigmasq_x_priors):
-            prior.resample(self.X[:, h*self.D:(h+1)*self.D])
+            __init__(V, K, H, X=X, b=b, sigmasq_b=sigmasq_b,
+                     sigmasq_prior_prms=sigmasq_prior_prms,
+                     nu=nu, alpha=alpha)
+        self.name = name if name is not None else "molsm_shrink_K{}_H{}".format(K, H)
 
 
 class FactorialLatentSpaceModel(LatentSpaceModel):
-    def __init__(self, V, K, X=None, b=None, sigmasq_b=1.0, rho=None, alpha=1.0):
-        super(FactorialLatentSpaceModel, self).__init__(V, K, X=X, b=b, sigmasq_b=sigmasq_b)
+    def __init__(self, V, K, X=None, b=None, sigmasq_b=1.0,
+                 sigmasq_prior_prms=None, name=None,
+                 rho=None, alpha=1.0):
+        super(FactorialLatentSpaceModel, self).\
+            __init__(V, K, X=X, b=b, sigmasq_b=sigmasq_b, sigmasq_prior_prms=sigmasq_prior_prms)
 
         # Prior on factors
         self.alpha = alpha
         self.rho = rho * np.ones(K) if rho is not None else npr.beta(alpha / K, 1.0, size=K)
         assert self.rho.shape == (self.K,) and np.all(self.rho >= 0)
+
+        self.name = name if name is not None else "flsm_K{}".format(K)
+
+    def log_prior(self):
+        lp = super(FactorialLatentSpaceModel, self).log_prior()
+
+        # p(rho)
+        for r in self.rho:
+            lp += beta(self.alpha / self.K, 1.0).logpdf(r)
+
+        # p({m} | rho)
+        msum = np.sum(self.ms, axis=0)
+        lp += np.dot(msum, np.log(self.rho))
+        lp += np.dot(len(self.ms) - msum, np.log(1-self.rho))
+        return lp
 
     def add_data(self, A, m=None, mask=None):
         m = npr.rand(self.K) < self.rho
@@ -373,8 +412,7 @@ class FactorialLatentSpaceModel(LatentSpaceModel):
         return A
 
     def resample(self):
-        self._resample_X()
-        self._resample_b()
+        super(FactorialLatentSpaceModel, self).resample()
         self._resample_m()
         self._resample_rho()
 
